@@ -11,7 +11,7 @@ declare(strict_types=1);
  */
 
 // Public url of the sample csv used in this example (CHANGE WITH YOUR OWN CSV URL IF YOU WISH)
-$csvUrl = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vTO8DC8xzEEyP754B0kBu1sa2P9Rn3I8OLmq_RJYHwOwTlY8OGvpjp1yvaE84Imj0HYQeJcNKT2TOFR/pub?gid=168068017&single=true&output=csv';
+$csvUrl = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSIWDcsYMucDxSWB3kqqpzxnAxHfrimLUXcOa3mBWn312HXa8VnwatfGoSWoJsFn1Fpq8r65Uqi8MoG/pub?output=csv';
 
 // HTTP Verb
 $httpVerb = 'POST';
