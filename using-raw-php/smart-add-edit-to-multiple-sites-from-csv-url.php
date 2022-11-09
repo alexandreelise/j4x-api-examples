@@ -51,15 +51,22 @@ $nested = function (array $arr): array {
 	$iterator            = new RecursiveIteratorIterator(new RecursiveArrayIterator($arr), RecursiveIteratorIterator::CATCH_GET_CHILD);
 	foreach ($iterator as $key => $value)
 	{
-		if (json_decode($value) === false)
+		if (mb_strpos($value, '{') === 0)
+		{
+			echo 'current item key: ' . $key . ' with value ' . $value . PHP_EOL;
+			// Doesn't seem to make sense at first but this one line allows to show intro/fulltext images and urla,urlb,urlc
+			$handleComplexValues[$key] = json_decode(str_replace(["\n", "\r", "\t"], '', trim($value)));
+		}
+		elseif (json_decode($value) === false)
 		{
 			$handleComplexValues[$key] = json_encode($value);
+			echo 'current item key: ' . $key . ' with value ' . $value . PHP_EOL;
 		}
 		else
 		{
 			$handleComplexValues[$key] = $value;
+			echo 'current item key: ' . $key . ' with value ' . $value . PHP_EOL;
 		}
-		echo 'current item key: ' . $key . ' with value ' . $handleComplexValues[$key] . PHP_EOL;
 	}
 	
 	return $handleComplexValues;
