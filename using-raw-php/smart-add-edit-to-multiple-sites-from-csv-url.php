@@ -133,7 +133,7 @@ $generator = function (string $url, array $keys, callable $givenNested): Generat
 			
 			if (!is_string($currentLine) || empty($currentLine))
 			{
-				yield new RuntimeException('Current line MUST NOT be empty', 422);
+				continue;
 			}
 			
 			$extractedContent = str_getcsv($currentLine);
