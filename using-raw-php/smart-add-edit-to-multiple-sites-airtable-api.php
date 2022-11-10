@@ -53,7 +53,7 @@ $generator = function (string $airtableResponse, array $keys): Generator {
 	
 	if (empty($airtableResponse))
 	{
-		yield new RuntimeException('Url MUST NOT be empty', 422);
+		yield new RuntimeException('Airtable Response MUST NOT be empty', 422);
 	}
 	
 	$defaultKeys = [
@@ -96,6 +96,11 @@ $generator = function (string $airtableResponse, array $keys): Generator {
 				if (!in_array($fieldKey, $mergedKeys, true))
 				{
 					unset($record->fields->$fieldKey);
+				}
+				if (is_string($fieldValue) && mb_strpos($fieldValue, '{') === 0)
+				{
+					//IMPORTANT: This one line allows to see intro/fulltext images and urla,urlb,urlc
+					$record->fields->$fieldKey = json_decode(str_replace(["\n", "\r", "\t"], '', trim($fieldValue)));
 				}
 			}
 			// Re-encode the fields to send it back as JSON
