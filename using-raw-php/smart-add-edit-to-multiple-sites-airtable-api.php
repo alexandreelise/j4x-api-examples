@@ -89,8 +89,19 @@ $generator = function (string $airtableResponse, array $keys): Generator {
 	
 	try
 	{
+		if (is_array($resource->records) && empty($resource->records))
+		{
+			throw new RuntimeException('No records found in your Airtable table. Cannot continue.', 422);
+		}
+		
 		foreach ($resource->records as $record)
 		{
+			if (empty((array)$record->fields))
+			{
+				echo 'No fields found in this record' . PHP_EOL;
+				continue;
+			}
+			
 			foreach ($record->fields as $fieldKey => $fieldValue)
 			{
 				if (!in_array($fieldKey, $mergedKeys, true))
@@ -195,7 +206,7 @@ try
 		}
 		catch (Throwable $streamDataThrowable)
 		{
-			echo $streamDataThrowable->getMessage() . PHP_EOL;
+			echo $streamDataThrowable->getTraceAsString() . PHP_EOL;
 			continue;
 		} finally
 		{
@@ -227,7 +238,7 @@ try
 		}
 		catch (Throwable $storageThrowable)
 		{
-			echo $storageThrowable->getMessage() . PHP_EOL;
+			echo $storageThrowable->getTraceAsString() . PHP_EOL;
 			continue;
 		} finally
 		{
@@ -237,7 +248,7 @@ try
 }
 catch (Throwable $e)
 {
-	echo $e->getMessage() . PHP_EOL;
+	echo $e->getTraceAsString() . PHP_EOL;
 } finally
 {
 	curl_close($dataSourceTransport);
