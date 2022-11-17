@@ -2,7 +2,7 @@
 declare(strict_types=1);
 
 /**
- * Add or Edit Joomla! Articles to multiple Joomla! sites using Airtable API
+ * Add or Edit Joomla! Articles Via API Using Airtable API
  * - When id = 0 in csv it's doing a POST. If alias exists it add a random slug at the end of your alias and do POST again
  * - When id > 0 in csv it's doing a PATCH. If alias exists it add a random slug at the end of your alias and do PATCH again
  *
@@ -16,7 +16,8 @@ declare(strict_types=1);
 $dataSourceUrl = 'https://api.airtable.com/v0/apptBHEIQEEuQZDUg/tblVWSWobBIo5q6bX';
 
 // Your Airtable Api token
-$dataSourceToken = 'yourairtableapitoken';
+$dataSourceToken = 'yourairtableapikey';
+
 
 // Your Joomla! 4.x website base url
 $baseUrl = [
@@ -26,9 +27,9 @@ $baseUrl = [
 ];
 // Your Joomla! 4.x Api Token (DO NOT STORE IT IN YOUR REPO USE A VAULT OR A PASSWORD MANAGER)
 $token    = [
-	'app-001' => 'yourapp001token',
-	'app-002' => 'yourapp002token',
-	'app-003' => 'yourapp003token',
+	'app-001' => 'yourapp001joomlaapitoken',
+	'app-002' => 'yourapp002joomlaapitoken',
+	'app-003' => 'yourapp003joomlaapitoken',
 ];
 $basePath = 'api/index.php/v1';
 
@@ -53,7 +54,7 @@ $generator = function (string $airtableResponse, array $keys): Generator {
 	
 	if (empty($airtableResponse))
 	{
-		yield new RuntimeException('Airtable Response MUST NOT be empty', 422);
+		yield new RuntimeException('Url MUST NOT be empty', 422);
 	}
 	
 	$defaultKeys = [
@@ -73,6 +74,7 @@ $generator = function (string $airtableResponse, array $keys): Generator {
 		'images',
 		'urls',
 		'tokenindex',
+		'picture',
 	];
 	
 	$mergedKeys = empty($keys) ? $defaultKeys : array_unique(array_merge($defaultKeys, $keys));
@@ -93,25 +95,95 @@ $generator = function (string $airtableResponse, array $keys): Generator {
 		{
 			throw new RuntimeException('No records found in your Airtable table. Cannot continue.', 422);
 		}
+		$picturePath = __DIR__ . '/images/';
 		
-		foreach ($resource->records as $record)
+		$downloadPicture = function (stdClass $givenPicture, string $destination) {
+			if (!property_exists($givenPicture, 'url'))
+			{
+				throw new DomainException('Cannot download current picture. Malformed datastructure url and filename MUST be present in givenPicture class parameter', 422);
+			}
+			if (empty($destination))
+			{
+				throw new DomainException('Destination path for pictures download MUST not be empty', 422);
+			}
+			$contentType = explode(';', get_headers($givenPicture->url, true)['Content-Type'])[0];
+			if (!in_array($contentType, ['image/png', 'image/jpeg', 'image/jpg', 'image/gif'], true))
+			{
+				throw new DomainException('Picture format not allowed at the moment', 415);
+			}
+			$imageData = file_get_contents($givenPicture->url);
+			if (!file_exists($destination))
+			{
+				mkdir($destination, 0700, true);
+			}
+			$destinationFile = sprintf('%s/%s.%s', $destination, hash('sha3-512', $imageData, false), explode('/', $contentType)[1]);
+			if (!file_exists($destinationFile))
+			{
+				file_put_contents($destinationFile, $imageData);
+			}
+		};
+		
+		foreach ($resource->records as $recordKey => $record)
 		{
-			if (empty((array)$record->fields))
+			if (empty((array) $record->fields))
 			{
 				echo 'No fields found in this record' . PHP_EOL;
 				continue;
 			}
-			
 			foreach ($record->fields as $fieldKey => $fieldValue)
 			{
 				if (!in_array($fieldKey, $mergedKeys, true))
 				{
 					unset($record->fields->$fieldKey);
 				}
+				if (!isset($record->fields->$fieldKey))
+				{
+					continue;
+				}
 				if (is_string($fieldValue) && mb_strpos($fieldValue, '{') === 0)
 				{
 					//IMPORTANT: This one line allows to see intro/fulltext images and urla,urlb,urlc
 					$record->fields->$fieldKey = json_decode(str_replace(["\n", "\r", "\t"], '', trim($fieldValue)));
+					
+					if ($fieldKey === 'images')
+					{
+						$moreThanOnePicture = [];
+						foreach ($record->fields->picture as $index => $currentPicture)
+						{
+							try
+							{
+								// In all case we want to download the full thumbnail
+								$downloadPicture($currentPicture->thumbnails->large, $picturePath);
+								if ($index === 0)
+								{
+									//Just for the first image we want to download both full and large
+									$downloadPicture($currentPicture->thumbnails->full, $picturePath);
+									
+									$record->fields->images->image_intro    = $currentPicture->thumbnails->large->url;
+									$record->fields->images->image_fulltext = $currentPicture->thumbnails->full->url;
+								}
+								$moreThanOnePicture[] = <<<MEDIA
+<figure>
+<img src="{$currentPicture->thumbnails->large->url}" alt="">
+<figcaption>Picture from Datasource - Airtable</figcaption>
+</figure>
+MEDIA;
+							}
+							catch (Throwable $pictureDownloadThrowable)
+							{
+								// On failure to download images try to add them as url anyway
+								$record->fields->images->image_intro    = $currentPicture->thumbnails->large->url;
+								$record->fields->images->image_fulltext = $currentPicture->thumbnails->full->url;
+								$pictureDownloadThrowable->getTraceAsString() . PHP_EOL;
+								continue;
+							}
+						}
+						
+						//Prepend articletext and fulltext when there is more than 1 picture provided in the Airtable attachments fields
+						$record->fields->articletext = sprintf('%s<br><hr>%s', implode('', $moreThanOnePicture), $record->fields->articletext);
+						$record->fields->fulltext    = sprintf('%s<br><hr>%s', implode('', $moreThanOnePicture), $record->fields->fulltext);
+						
+					}
 				}
 			}
 			// Re-encode the fields to send it back as JSON
