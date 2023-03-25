@@ -38,6 +38,61 @@ $timeout = 10;
 // For the custom fields to work they need to be added in the csv and to exists in the Joomla! site.
 $customFieldKeys = []; //['with-coffee','with-dessert','extra-water-bottle'];
 
+// Silent mode. (If set to true, no messages displayed on the screen while processing data and it might improve performance)
+$silent = true;
+
+// Line numbers we want in any order (e.g 9,1-3,10,14-17,21,102-78,99-99). Leave empty to process all lines
+$whatLineNumbersYouWant = '1-3,7-7,14-11,15,17,21';
+$computedLineNumbers    = function (string $wantedLineNumbers = '') {
+	if ($wantedLineNumbers === '')
+	{
+		return [];
+	}
+	// Don't match more than 10 "groups" separated by commas
+	$commaParts = explode(',', $wantedLineNumbers, 10);
+	if ($commaParts === false)
+	{
+		return [];
+	}
+	asort($commaParts, SORT_NATURAL);
+	$output = [];
+	foreach ($commaParts as $commaPart)
+	{
+		if (strpos($commaPart, '-') === false)
+		{
+			$output[] = (int) $commaPart;
+			// Skip to next comma part
+			continue;
+		}
+		// maximum 1 dash "group" per comma separated "groups"
+		$dashParts = explode('-', $commaPart, 2);
+		if ($dashParts === false)
+		{
+			$output[] = (int) $commaPart;
+			// Skip to next comma part
+			continue;
+		}
+		$dashParts[0] = (int) $dashParts[0];
+		$dashParts[1] = (int) $dashParts[1];
+		// Only store one digit if both are the same in the range
+		if ($dashParts[0] === $dashParts[1])
+		{
+			$output[] = $dashParts[0];
+		}
+		elseif ($dashParts[0] > $dashParts[1])
+		{
+			// Store expanded range of numbers
+			$output = array_merge($output, range($dashParts[1], $dashParts[0], 1));
+		}
+		else
+		{
+			// Store expanded range of numbers
+			$output = array_merge($output, range($dashParts[0], $dashParts[1], 1));
+		}
+	}
+	
+	return array_unique($output, SORT_NUMERIC);
+};
 
 // This time we need endpoint to be a function to make it more dynamic
 $endpoint = function (string $givenBaseUrl, string $givenBasePath, int $givenResourceId = 0): string {
@@ -46,26 +101,26 @@ $endpoint = function (string $givenBaseUrl, string $givenBasePath, int $givenRes
 };
 
 // handle nested json
-$nested = function (array $arr): array {
+$nested = function (array $arr, bool $isSilent = false): array {
 	$handleComplexValues = [];
 	$iterator            = new RecursiveIteratorIterator(new RecursiveArrayIterator($arr), RecursiveIteratorIterator::CATCH_GET_CHILD);
 	foreach ($iterator as $key => $value)
 	{
 		if (mb_strpos($value, '{') === 0)
 		{
-			echo 'current item key: ' . $key . ' with value ' . $value . PHP_EOL;
+			echo $isSilent ? '' : 'current item key: ' . $key . ' with value ' . $value . PHP_EOL;
 			// Doesn't seem to make sense at first but this one line allows to show intro/fulltext images and urla,urlb,urlc
 			$handleComplexValues[$key] = json_decode(str_replace(["\n", "\r", "\t"], '', trim($value)));
 		}
 		elseif (json_decode($value) === false)
 		{
 			$handleComplexValues[$key] = json_encode($value);
-			echo 'current item key: ' . $key . ' with value ' . $value . PHP_EOL;
+			echo $isSilent ? '' : 'current item key: ' . $key . ' with value ' . $value . PHP_EOL;
 		}
 		else
 		{
 			$handleComplexValues[$key] = $value;
-			echo 'current item key: ' . $key . ' with value ' . $value . PHP_EOL;
+			echo $isSilent ? '' : 'current item key: ' . $key . ' with value ' . $value . PHP_EOL;
 		}
 	}
 	
@@ -73,7 +128,7 @@ $nested = function (array $arr): array {
 };
 
 // PHP Generator to efficiently read the csv file
-$generator = function (string $url, array $keys, callable $givenNested): Generator {
+$generator = function (string $url, array $keys, callable $givenNested, bool $isSilent = false): Generator {
 	
 	if (empty($url))
 	{
@@ -149,7 +204,7 @@ $generator = function (string $url, array $keys, callable $givenNested): Generat
 			$commonValues = array_intersect_key($extractedContent, $commonKeys);
 			
 			// Iteration on leafs AND nodes
-			$handleComplexValues = $givenNested($commonValues);
+			$handleComplexValues = $givenNested($commonValues, $isSilent);
 			$encodedContent      = json_encode(array_combine($commonKeys, $handleComplexValues));
 			if ($encodedContent !== false)
 			{
@@ -191,12 +246,22 @@ $process = function (string $givenHttpVerb, string $endpoint, string $dataString
 	return $response;
 };
 // Read CSV in a PHP Generator using streams in non-blocking I/O mode
-$streamCsv = $generator($csvUrl, $customFieldKeys, $nested);
+$streamCsv = $generator($csvUrl, $customFieldKeys, $nested, $silent);
 $storage   = [];
+
+// only process line numbers we want
+$currentLineNumber = 1;
+$filteredLineNumbers = $computedLineNumbers($whatLineNumbersYouWant);
+
 foreach ($streamCsv as $dataKey => $dataString)
 {
+	if (($computedLineNumbers !== []) && (!in_array($currentLineNumber, $filteredLineNumbers, true))) {
+		++$currentLineNumber;
+		continue;
+	}
 	if (!is_string($dataString))
 	{
+		++$currentLineNumber;
 		continue;
 	}
 	$curl = curl_init();
@@ -205,6 +270,7 @@ foreach ($streamCsv as $dataKey => $dataString)
 		$decodedDataString = json_decode($dataString);
 		if ($decodedDataString === false)
 		{
+			++$currentLineNumber;
 			continue;
 		}
 		
@@ -227,12 +293,14 @@ foreach ($streamCsv as $dataKey => $dataString)
 		{
 			// If article is potentially a duplicate (already exists with same alias)
 			$storage[$dataKey] = ['mightExists' => $decodedJsonOutput->errors[0]->code === 400, 'decodedDataString' => $decodedDataString];
+			++$currentLineNumber;
 			continue;
 		}
 	}
 	catch (Throwable $e)
 	{
-		echo $e->getMessage() . PHP_EOL;
+		echo $silent ? '' : $e->getMessage() . $e->getLine() . PHP_EOL;
+		++$currentLineNumber;
 		continue;
 	} finally
 	{
@@ -259,12 +327,12 @@ foreach ($storage as $item)
 				sprintf('X-Joomla-Token: %s', trim($token[$item['decodedDataString']->tokenindex])),
 			];
 			$output  = $process($pk ? 'PATCH' : 'POST', $endpoint($baseUrl[$item['decodedDataString']->tokenindex], $basePath, $pk), $dataString, $headers, $timeout, $curl);
-			echo $output . PHP_EOL;
+			echo $silent ? '' : $output . PHP_EOL;
 		}
 	}
 	catch (Throwable $e)
 	{
-		echo $e->getMessage() . PHP_EOL;
+		echo $silent ? '' : $e->getMessage() . $e->getLine() . PHP_EOL;
 		continue;
 	} finally
 	{
