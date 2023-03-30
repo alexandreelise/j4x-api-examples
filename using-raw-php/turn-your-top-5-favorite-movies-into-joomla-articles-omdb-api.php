@@ -6,7 +6,7 @@ declare(strict_types=1);
  * - When id = 0 it's doing a POST. If alias exists it add a random slug at the end of your alias and do POST again
  * - When id > 0 it's doing a PATCH. If alias exists it add a random slug at the end of your alias and do PATCH again
  *
- * @author        Alexandre ELISÉ <contact@alexandree.io>
+ * @author        Alexandre ELISÉ <code@apiadept.com>
  * @copyright (c) 2009 - present. Alexandre ELISÉ. All rights reserved.
  * @license       GPL-2.0-and-later GNU General Public License v2.0 or later
  * @link          https://alexandree.io
