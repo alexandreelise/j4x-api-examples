@@ -6,10 +6,10 @@ declare(strict_types=1);
  * - When id = 0 it's doing a POST. If alias exists it add a random slug at the end of your alias and do POST again
  * - When id > 0 it's doing a PATCH. If alias exists it add a random slug at the end of your alias and do PATCH again
  *
- * @author        Alexandre ELISÉ <contact@alexandree.io>
+ * @author        Alexandre ELISÉ <code@apiadept.com>
  * @copyright (c) 2009 - present. Alexandre ELISÉ. All rights reserved.
  * @license       GPL-2.0-and-later GNU General Public License v2.0 or later
- * @link          https://alexandree.io
+ * @link          https://apiadept.com
  */
 
 // Your OMDb API Key (GET YOUR OWN here : https://www.omdbapi.com/apikey.aspx)
@@ -105,7 +105,7 @@ $generator = function (string $dataSourceResponse, array $appIndexes): Generator
 {"image_intro": "$poster", "image_intro_caption": "$title", "image_intro_alt":"$title", "float_intro":"","image_fulltext": "$poster", "image_fulltext_caption": "$title", "image_fulltext_alt":"$title", "float_fulltext":""}
 JSON;
 		$urls   = <<<JSON
-{"urla":"https://alexandree.io","urlatext":"Website","targeta":"","urlb":"https://github.com/alexandreelise","urlbtext":"Github","targetb":"","urlc":"https://www.linkedin.com/in/alexandree","urlctext":"Twitter","targetc":""}
+{"urla":"https://apiadept.com","urlatext":"Website","targeta":"","urlb":"https://github.com/alexandreelise","urlbtext":"Github","targetb":"","urlc":"https://www.linkedin.com/in/alexandree","urlctext":"Twitter","targetc":""}
 
 JSON;
 		

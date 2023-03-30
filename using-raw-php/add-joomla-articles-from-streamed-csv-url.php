@@ -4,10 +4,10 @@ declare(strict_types=1);
 /**
  * Add Joomla! articles from streamed csv url (with POST)
  *
- * @author        Alexandre ELISÉ <contact@alexandree.io>
+ * @author        Alexandre ELISÉ <code@apiadept.com>
  * @copyright (c) 2009 - present. Alexandre ELISÉ. All rights reserved.
  * @license       GPL-2.0-and-later GNU General Public License v2.0 or later
- * @link          https://alexandree.io
+ * @link          https://apiadept.com
  */
 
 // Public url of the sample csv used in this example (CHANGE WITH YOUR OWN CSV URL IF YOU WISH)
