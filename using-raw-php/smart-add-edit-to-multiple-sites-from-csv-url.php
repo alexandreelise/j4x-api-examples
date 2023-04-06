@@ -129,7 +129,6 @@ $nested = function (array $arr, bool $isSilent = false): array {
 
 // PHP Generator to efficiently read the csv file
 $generator = function (string $url, array $keys, callable $givenNested, bool $isSilent = false, array $lineRange = []): Generator {
-	
 	if (empty($url))
 	{
 		yield new RuntimeException('Url MUST NOT be empty', 422);
@@ -273,6 +272,7 @@ foreach ($streamCsv as $dataKey => $dataString)
 		$decodedDataString = json_decode($dataString);
 		if ($decodedDataString === false)
 		{
+			++$currentLineNumber;
 			continue;
 		}
 		
