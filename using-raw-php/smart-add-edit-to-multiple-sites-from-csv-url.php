@@ -29,7 +29,6 @@ $token    = [
 ];
 $basePath = 'api/index.php/v1';
 
-
 // Request timeout
 $timeout = 10;
 
@@ -41,15 +40,16 @@ $customFieldKeys = []; //['with-coffee','with-dessert','extra-water-bottle'];
 // Silent mode. (If set to true, no messages displayed on the screen while processing data and it might improve performance)
 $silent = true;
 
-// Line numbers we want in any order (e.g 9,1-3,10,14-17,21,102-78,99-99). Leave empty to process all lines
-$whatLineNumbersYouWant = '1-3,7-7,14-11,15,17,21';
-$computedLineNumbers    = function (string $wantedLineNumbers = '') {
+// Line numbers we want in any order (e.g 9,7-7,2-4,10,17-14,21). Leave empty '' to process all lines (beginning at line 2. Same as csv file)
+$whatLineNumbersYouWant = '';
+
+$computedLineNumbers = function (string $wantedLineNumbers = '') {
 	if ($wantedLineNumbers === '')
 	{
 		return [];
 	}
 	// Don't match more than 10 "groups" separated by commas
-	$commaParts = explode(',', $wantedLineNumbers, 10);
+	$commaParts = explode(',', $wantedLineNumbers);
 	if ($commaParts === false)
 	{
 		return [];
@@ -128,7 +128,7 @@ $nested = function (array $arr, bool $isSilent = false): array {
 };
 
 // PHP Generator to efficiently read the csv file
-$generator = function (string $url, array $keys, callable $givenNested, bool $isSilent = false): Generator {
+$generator = function (string $url, array $keys, callable $givenNested, bool $isSilent = false, array $lineRange = []): Generator {
 	
 	if (empty($url))
 	{
@@ -168,7 +168,6 @@ $generator = function (string $url, array $keys, callable $givenNested, bool $is
 	
 	try
 	{
-		//NON-BLOCKING I/O (Does not wait before processing next line.)
 		stream_set_blocking($resource, false);
 		
 		$firstLine = stream_get_line(
@@ -185,6 +184,14 @@ $generator = function (string $url, array $keys, callable $givenNested, bool $is
 		$csvHeaderKeys = str_getcsv($firstLine);
 		$commonKeys    = array_intersect($csvHeaderKeys, $mergedKeys);
 		
+		$isExpanded           = ($lineRange !== []);
+		$currentCsvLineNumber = 1;
+		if ($isExpanded)
+		{
+			$minLineNumber = min($lineRange);
+			$maxLineNumber = max($lineRange);
+		}
+		
 		do
 		{
 			$currentLine = stream_get_line(
@@ -192,7 +199,7 @@ $generator = function (string $url, array $keys, callable $givenNested, bool $is
 				0,
 				"\r\n"
 			);
-			
+			$currentCsvLineNumber += 1;
 			if (!is_string($currentLine) || empty($currentLine))
 			{
 				continue;
@@ -206,12 +213,21 @@ $generator = function (string $url, array $keys, callable $givenNested, bool $is
 			// Iteration on leafs AND nodes
 			$handleComplexValues = $givenNested($commonValues, $isSilent);
 			$encodedContent      = json_encode(array_combine($commonKeys, $handleComplexValues));
-			if ($encodedContent !== false)
+			
+			// Last line number in range has been reached. Stop here
+			if ($isExpanded && ($currentCsvLineNumber > $maxLineNumber + 1))
+			{
+				break;
+			}
+			
+			if ($encodedContent === false)
+			{
+				yield new RuntimeException('Current line seem to be invalid', 422);
+			}
+			elseif (is_string($encodedContent) && (($isExpanded && in_array($currentCsvLineNumber, $lineRange, true)) || !$isExpanded))
 			{
 				yield $encodedContent;
 			}
-			
-			yield new RuntimeException('Current line seem to be invalid', 422);
 		} while (!feof($resource));
 	} finally
 	{
@@ -220,7 +236,7 @@ $generator = function (string $url, array $keys, callable $givenNested, bool $is
 };
 
 // Process data returned by the PHP Generator
-$process = function (string $givenHttpVerb, string $endpoint, string $dataString, array $headers, int $timeout, $transport) {
+$process             = function (string $givenHttpVerb, string $endpoint, string $dataString, array $headers, int $timeout, $transport) {
 	curl_setopt_array($transport, [
 			CURLOPT_URL            => $endpoint,
 			CURLOPT_RETURNTRANSFER => true,
@@ -245,32 +261,18 @@ $process = function (string $givenHttpVerb, string $endpoint, string $dataString
 	
 	return $response;
 };
-// Read CSV in a PHP Generator using streams in non-blocking I/O mode
-$streamCsv = $generator($csvUrl, $customFieldKeys, $nested, $silent);
-$storage   = [];
-
-// only process line numbers we want
-$currentLineNumber = 1;
-$filteredLineNumbers = $computedLineNumbers($whatLineNumbersYouWant);
+$expandedLineNumbers = $computedLineNumbers($whatLineNumbersYouWant);
+$streamCsv           = $generator($csvUrl, $customFieldKeys, $nested, $silent, $expandedLineNumbers);
+$storage             = [];
 
 foreach ($streamCsv as $dataKey => $dataString)
 {
-	if (($computedLineNumbers !== []) && (!in_array($currentLineNumber, $filteredLineNumbers, true))) {
-		++$currentLineNumber;
-		continue;
-	}
-	if (!is_string($dataString))
-	{
-		++$currentLineNumber;
-		continue;
-	}
 	$curl = curl_init();
 	try
 	{
 		$decodedDataString = json_decode($dataString);
 		if ($decodedDataString === false)
 		{
-			++$currentLineNumber;
 			continue;
 		}
 		
@@ -283,7 +285,9 @@ foreach ($streamCsv as $dataKey => $dataString)
 		];
 		
 		// Article primary key. Usually 'id'
-		$pk     = (int) $decodedDataString->id;
+		$pk = (int) $decodedDataString->id;
+		
+		
 		$output = $process($pk ? 'PATCH' : 'POST', $endpoint($baseUrl[$decodedDataString->tokenindex], $basePath, $pk), $dataString, $headers, $timeout, $curl);
 		
 		$decodedJsonOutput = json_decode($output);
@@ -292,15 +296,13 @@ foreach ($streamCsv as $dataKey => $dataString)
 		if (isset($decodedJsonOutput->errors))
 		{
 			// If article is potentially a duplicate (already exists with same alias)
-			$storage[$dataKey] = ['mightExists' => $decodedJsonOutput->errors[0]->code === 400, 'decodedDataString' => $decodedDataString];
-			++$currentLineNumber;
+			$storage[$dataKey] = ['mightExists' => $decodedJsonOutput->errors[0]->code === 400, 'decodedDataString' => $decodedDataString,];
 			continue;
 		}
 	}
 	catch (Throwable $e)
 	{
-		echo $silent ? '' : $e->getMessage() . $e->getLine() . PHP_EOL;
-		++$currentLineNumber;
+		echo $silent ? '' : sprintf('Message: %s, Line: %d%s', $e->getMessage(), $e->getLine(), PHP_EOL);
 		continue;
 	} finally
 	{
@@ -308,7 +310,7 @@ foreach ($streamCsv as $dataKey => $dataString)
 	}
 }
 // Handle errors and retries
-foreach ($storage as $item)
+foreach ($storage as $dataKeyRetry => $item)
 {
 	$curl = curl_init();
 	try
@@ -332,7 +334,7 @@ foreach ($storage as $item)
 	}
 	catch (Throwable $e)
 	{
-		echo $silent ? '' : $e->getMessage() . $e->getLine() . PHP_EOL;
+		echo $silent ? '' : sprintf('Message: %s, Line: %d%s', $e->getMessage(), $e->getLine(), PHP_EOL);
 		continue;
 	} finally
 	{
