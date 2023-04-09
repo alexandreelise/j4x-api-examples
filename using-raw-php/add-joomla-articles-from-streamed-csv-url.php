@@ -6,7 +6,7 @@ declare(strict_types=1);
  *
  * @author        Alexandre ELISÉ <code@apiadept.com>
  * @copyright (c) 2009 - present. Alexandre ELISÉ. All rights reserved.
- * @license       GPL-2.0-and-later GNU General Public License v2.0 or later
+ * @license GNU Affero General Public License version 3 (AGPLv3)
  * @link          https://apiadept.com
  */
 
