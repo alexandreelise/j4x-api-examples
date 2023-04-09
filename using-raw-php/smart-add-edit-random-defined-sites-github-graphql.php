@@ -2,7 +2,7 @@
 declare(strict_types=1);
 
 /**
- * Add or Edit Joomla! Articles Via API To Multiple Sites Chosen Randomly in from a predefined list Using Github GraphQL API
+ * Add or Edit Joomla! Articles Via API To Multiple Sites Chosen Randomly in from a predefined list Using GitHub GraphQL API
  * - When id = 0 in csv it's doing a POST. If alias exists it add a random slug at the end of your alias and do POST again
  * - When id > 0 in csv it's doing a PATCH. If alias exists it add a random slug at the end of your alias and do PATCH again
  *
@@ -12,10 +12,10 @@ declare(strict_types=1);
  * @link          https://apiadept.com
  */
 
-// Your Github GraphQL API endpoint url
+// Your GitHub GraphQL API endpoint url
 $dataSourceUrl = 'https://api.github.com/graphql';
 
-// Your Github Personal Token (classic) (CHANGE WITH YOUR OWN TOKEN)
+// Your GitHub Personal Token (classic) (CHANGE WITH YOUR OWN TOKEN)
 $dataSourceToken = 'ghp_yourowngithubpersonalclassictoken';
 
 // Your repository owner (CHANGE THIS WITH YOUR OWN)
@@ -42,14 +42,14 @@ $basePath = 'api/index.php/v1';
 // Request timeout
 $timeout = 10;
 
-// PHP Generator to efficiently process Github GraphQL Api response
+// PHP Generator to efficiently process GitHub GraphQL Api response
 $generator = function (string $dataSourceResponse, array $appIndexes): Generator {
-	
+
 	if (empty($dataSourceResponse))
 	{
 		yield new RuntimeException('Github GraphQL Api response MUST NOT be empty', 422);
 	}
-	
+
 	$defaultKeys = [
 		'id',
 		'access',
@@ -66,22 +66,22 @@ $generator = function (string $dataSourceResponse, array $appIndexes): Generator
 		'featured',
 		'tokenindex',
 	];
-	
+
 	// Assess robustness of the code by trying random key order
 	//shuffle($mergedKeys);
-	
+
 	$resource = json_decode($dataSourceResponse);
-	
+
 	if ($resource === false)
 	{
 		yield new RuntimeException('Could not read response', 500);
 	}
-	
+
 	try
 	{
 		$repositoryName = $resource->data->repository->name;
 		$repositoryUrl  = $resource->data->repository->url;
-		
+
 		$id       = 0;
 		$title    = sprintf('Stargazers of your %s Github repository', $repositoryName);
 		$alias    = '';
@@ -94,19 +94,19 @@ $generator = function (string $dataSourceResponse, array $appIndexes): Generator
 		$access   = 1;
 		//choosen random tokenindex to deploy result to random url matched by this tokenindex
 		$tokenindex = array_rand($appIndexes);
-		
+
 		$introtext = <<<HTML
 <p>Want to know who are your repo stargazers? Here they are</p>
 HTML;
-		
+
 		$stargazerList = '';
 		foreach ($resource->data->repository->stargazers->edges as $stargazer)
 		{
 			$stargazerList .= sprintf('<li>%s</li>', $stargazer->node->name);
 		}
-		
+
 		$fulltext    = <<<HTML
-<p>The stargazers for your Github repository named: <a href="$repositoryUrl" title="Your Github repository $repositoryName stargazers" target="_blank" rel="noopener nofollow">$repositoryName</a></p>
+<p>The stargazers for your GitHub repository named: <a href="$repositoryUrl" title="Your Github repository $repositoryName stargazers" target="_blank" rel="noopener nofollow">$repositoryName</a></p>
 <ul>
 $stargazerList
 </ul>
@@ -116,7 +116,7 @@ HTML;
 		<hr id="system-readmore" />
         $fulltext
 HTML;
-		
+
 		yield json_encode(
 			array_combine(
 				$defaultKeys,
@@ -166,14 +166,14 @@ $process = function (string $givenHttpVerb, string $endpoint, string $dataString
 			CURLOPT_HTTPHEADER     => $headers,
 		]
 	);
-	
+
 	$response = curl_exec($transport);
 	// Continue even on partial failure
 	if (empty($response))
 	{
 		throw new RuntimeException('Empty output', 422);
 	}
-	
+
 	return $response;
 };
 
@@ -214,7 +214,7 @@ try
 {
 	$dataSourceResponse = $process($dataSourceHttpVerb, $dataSourceUrl, $dataSourceDataString, $dataSourceHeaders, $dataSourceTimeout, $dataSourceTransport);
 	$streamData         = $generator($dataSourceResponse, $baseUrl);
-	
+
 	$storage = [];
 	foreach ($streamData as $dataString)
 	{
@@ -230,7 +230,7 @@ try
 			{
 				continue;
 			}
-			
+
 			// HTTP request headers
 			$headers = [
 				'Accept: application/vnd.api+json',
@@ -238,13 +238,13 @@ try
 				'Content-Length: ' . mb_strlen($dataString),
 				sprintf('X-Joomla-Token: %s', trim($token[$decodedDataString->tokenindex])),
 			];
-			
+
 			// Article primary key. Usually 'id'
 			$pk     = (int) $decodedDataString->id;
 			$output = $process($pk ? 'PATCH' : 'POST', $endpoint($baseUrl[$decodedDataString->tokenindex], $basePath, $pk), $dataString, $headers, $timeout, $curl);
-			
+
 			$decodedJsonOutput = json_decode($output);
-			
+
 			// don't show errors, handle them gracefully
 			if (isset($decodedJsonOutput->errors))
 			{
