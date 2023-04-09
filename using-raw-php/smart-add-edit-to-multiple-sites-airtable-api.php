@@ -51,12 +51,12 @@ $endpoint = function (string $givenBaseUrl, string $givenBasePath, int $givenRes
 
 // PHP Generator to efficiently process Airtable Api response
 $generator = function (string $airtableResponse, array $keys): Generator {
-	
+
 	if (empty($airtableResponse))
 	{
 		yield new RuntimeException('Url MUST NOT be empty', 422);
 	}
-	
+
 	$defaultKeys = [
 		'id',
 		'access',
@@ -76,19 +76,19 @@ $generator = function (string $airtableResponse, array $keys): Generator {
 		'tokenindex',
 		'picture',
 	];
-	
+
 	$mergedKeys = empty($keys) ? $defaultKeys : array_unique(array_merge($defaultKeys, $keys));
-	
+
 	// Assess robustness of the code by trying random key order
 	//shuffle($mergedKeys);
-	
+
 	$resource = json_decode($airtableResponse);
-	
+
 	if ($resource === false)
 	{
 		yield new RuntimeException('Could not read airtable response', 500);
 	}
-	
+
 	try
 	{
 		if (is_array($resource->records) && empty($resource->records))
@@ -96,7 +96,7 @@ $generator = function (string $airtableResponse, array $keys): Generator {
 			throw new RuntimeException('No records found in your Airtable table. Cannot continue.', 422);
 		}
 		$picturePath = __DIR__ . '/images/';
-		
+
 		$downloadPicture = function (stdClass $givenPicture, string $destination) {
 			if (!property_exists($givenPicture, 'url'))
 			{
@@ -122,8 +122,8 @@ $generator = function (string $airtableResponse, array $keys): Generator {
 				file_put_contents($destinationFile, $imageData);
 			}
 		};
-		
-		foreach ($resource->records as $recordKey => $record)
+
+		foreach ($resource->records as $record)
 		{
 			if (empty((array) $record->fields))
 			{
@@ -144,7 +144,7 @@ $generator = function (string $airtableResponse, array $keys): Generator {
 				{
 					//IMPORTANT: This one line allows to see intro/fulltext images and urla,urlb,urlc
 					$record->fields->$fieldKey = json_decode(str_replace(["\n", "\r", "\t"], '', trim($fieldValue)));
-					
+
 					if ($fieldKey === 'images')
 					{
 						$moreThanOnePicture = [];
@@ -158,7 +158,7 @@ $generator = function (string $airtableResponse, array $keys): Generator {
 								{
 									//Just for the first image we want to download both full and large
 									$downloadPicture($currentPicture->thumbnails->full, $picturePath);
-									
+
 									$record->fields->images->image_intro    = $currentPicture->thumbnails->large->url;
 									$record->fields->images->image_fulltext = $currentPicture->thumbnails->full->url;
 								}
@@ -174,15 +174,15 @@ MEDIA;
 								// On failure to download images try to add them as url anyway
 								$record->fields->images->image_intro    = $currentPicture->thumbnails->large->url;
 								$record->fields->images->image_fulltext = $currentPicture->thumbnails->full->url;
-								$pictureDownloadThrowable->getTraceAsString() . PHP_EOL;
+								echo $pictureDownloadThrowable->getTraceAsString() . PHP_EOL;
 								continue;
 							}
 						}
-						
+
 						//Prepend articletext and fulltext when there is more than 1 picture provided in the Airtable attachments fields
 						$record->fields->articletext = sprintf('%s<br><hr>%s', implode('', $moreThanOnePicture), $record->fields->articletext);
 						$record->fields->fulltext    = sprintf('%s<br><hr>%s', implode('', $moreThanOnePicture), $record->fields->fulltext);
-						
+
 					}
 				}
 			}
@@ -211,14 +211,14 @@ $process = function (string $givenHttpVerb, string $endpoint, string $dataString
 			CURLOPT_HTTPHEADER     => $headers,
 		]
 	);
-	
+
 	$response = curl_exec($transport);
 	// Continue even on partial failure
 	if (empty($response))
 	{
 		throw new RuntimeException('Empty output', 422);
 	}
-	
+
 	return $response;
 };
 
@@ -235,7 +235,7 @@ $dataSourceTransport = curl_init();
 try
 {
 	$dataSourceResponse = $process($dataSourceHttpVerb, $dataSourceUrl, '', $dataSourceHeaders, $dataSourceTimeout, $dataSourceTransport);
-	
+
 	$streamData = $generator($dataSourceResponse, $customFieldKeys);
 	$storage    = [];
 	foreach ($streamData as $dataKey => $dataString)
@@ -252,7 +252,7 @@ try
 			{
 				continue;
 			}
-			
+
 			// HTTP request headers
 			$headers = [
 				'Accept: application/vnd.api+json',
@@ -260,13 +260,13 @@ try
 				'Content-Length: ' . mb_strlen($dataString),
 				sprintf('X-Joomla-Token: %s', trim($token[$decodedDataString->tokenindex])),
 			];
-			
+
 			// Article primary key. Usually 'id'
 			$pk     = (int) $decodedDataString->id;
 			$output = $process($pk ? 'PATCH' : 'POST', $endpoint($baseUrl[$decodedDataString->tokenindex], $basePath, $pk), $dataString, $headers, $timeout, $curl);
-			
+
 			$decodedJsonOutput = json_decode($output);
-			
+
 			// don't show errors, handle them gracefully
 			if (isset($decodedJsonOutput->errors))
 			{
