@@ -37,7 +37,7 @@ $timeout = 10;
 // For the custom fields to work they need to be added in the csv and to exists in the Joomla! site.
 $customFieldKeys = []; //['with-coffee','with-dessert','extra-water-bottle'];
 
-// Silent mode. (If set to true, no messages displayed on the screen while processing data and it might improve performance)
+// Silent mode. (If set to true, no messages displayed on the screen while processing data, and it might improve performance)
 $silent = true;
 
 // Line numbers we want in any order (e.g 9,7-7,2-4,10,17-14,21). Leave empty '' to process all lines (beginning at line 2. Same as csv file)
