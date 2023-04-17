@@ -37,11 +37,14 @@ $timeout = 10;
 // For the custom fields to work they need to be added in the csv and to exists in the Joomla! site.
 $customFieldKeys = []; //['with-coffee','with-dessert','extra-water-bottle'];
 
-// Silent mode. (If set to true, no messages displayed on the screen while processing data, and it might improve performance)
-$silent = true;
+// Silent mode
+// 0: hide both response result and key value pairs
+// 1: show response result only
+// 2: show key value pairs only
+$silent = 1;
 
 // Line numbers we want in any order (e.g 9,7-7,2-4,10,17-14,21). Leave empty '' to process all lines (beginning at line 2. Same as csv file)
-$whatLineNumbersYouWant = '';
+$whatLineNumbersYouWant = '2-30';
 
 $computedLineNumbers = function (string $wantedLineNumbers = '') {
     if ($wantedLineNumbers === '') {
@@ -91,20 +94,20 @@ $endpoint = function (string $givenBaseUrl, string $givenBasePath, int $givenRes
 };
 
 // handle nested json
-$nested = function (array $arr, bool $isSilent = false): array {
+$nested = function (array $arr, int $isSilent = 0): array {
     $handleComplexValues = [];
     $iterator = new RecursiveIteratorIterator(new RecursiveArrayIterator($arr), RecursiveIteratorIterator::CATCH_GET_CHILD);
     foreach ($iterator as $key => $value) {
         if (mb_strpos($value, '{') === 0) {
-            echo $isSilent ? '' : 'current item key: ' . $key . ' with value ' . $value . PHP_EOL;
+            echo $isSilent == 2 ? sprintf("\033[34m item with key: %s with value: %s\033[0m%s", $key, $value, PHP_EOL) : '';
             // Doesn't seem to make sense at first but this one line allows to show intro/fulltext images and urla,urlb,urlc
             $handleComplexValues[$key] = json_decode(str_replace(["\n", "\r", "\t"], '', trim($value)));
         } elseif (json_decode($value) === false) {
             $handleComplexValues[$key] = json_encode($value);
-            echo $isSilent ? '' : 'current item key: ' . $key . ' with value ' . $value . PHP_EOL;
+            echo $isSilent == 2 ? sprintf("\033[34m item with key: %s with value: %s\033[0m%s", $key, $value, PHP_EOL) : '';
         } else {
             $handleComplexValues[$key] = $value;
-            echo $isSilent ? '' : 'current item key: ' . $key . ' with value ' . $value . PHP_EOL;
+            echo $isSilent == 2 ? sprintf("\033[34m item with key: %s with value: %s\033[0m%s", $key, $value, PHP_EOL) : '';
         }
     }
 
@@ -112,7 +115,7 @@ $nested = function (array $arr, bool $isSilent = false): array {
 };
 
 // PHP Generator to efficiently read the csv file
-$generator = function (string $url, array $keys, callable $givenNested, bool $isSilent = false, array $lineRange = []): Generator {
+$generator = function (string $url, array $keys, callable $givenNested, int $isSilent = 1, array $lineRange = []): Generator {
     if (empty($url)) {
         yield new RuntimeException('Url MUST NOT be empty', 422);
     }
@@ -182,12 +185,22 @@ $generator = function (string $url, array $keys, callable $givenNested, bool $is
 
             $extractedContent = str_getcsv($currentLine);
 
+            // Skip empty lines
+            if (empty($extractedContent)) {
+                continue;
+            }
+
             // Allow using csv keys in any order
             $commonValues = array_intersect_key($extractedContent, $commonKeys);
 
+            // Skip invalid lines
+            if (empty($commonValues)) {
+                continue;
+            }
+
             // Iteration on leafs AND nodes
             $handleComplexValues = $givenNested($commonValues, $isSilent);
-            $encodedContent = json_encode(array_combine($commonKeys, $handleComplexValues));
+            $encodedContent = json_encode(array_combine($commonKeys, $handleComplexValues), JSON_THROW_ON_ERROR);
 
             // Last line number in range has been reached. Stop here
             if ($isExpanded && ($currentCsvLineNumber > $maxLineNumber + 1)) {
@@ -197,7 +210,7 @@ $generator = function (string $url, array $keys, callable $givenNested, bool $is
             if ($encodedContent === false) {
                 yield new RuntimeException('Current line seem to be invalid', 422);
             } elseif (is_string($encodedContent) && (($isExpanded && in_array($currentCsvLineNumber, $lineRange, true)) || !$isExpanded)) {
-                yield $encodedContent;
+                yield ['line' => $currentCsvLineNumber, 'content' => $encodedContent];
             }
         } while (!feof($resource));
     } finally {
@@ -234,15 +247,23 @@ $expandedLineNumbers = $computedLineNumbers($whatLineNumbersYouWant);
 $streamCsv = $generator($csvUrl, $customFieldKeys, $nested, $silent, $expandedLineNumbers);
 $storage = [];
 
-foreach ($streamCsv as $dataKey => $dataString) {
+foreach ($streamCsv as $dataKey => $dataValue) {
+    $dataCurrentCSVline = $dataValue['line'];
+    $dataString = $dataValue['content'];
+
     $curl = curl_init();
+
     try {
         if (!is_string($dataString)) {
             continue;
         }
 
-        $decodedDataString = json_decode($dataString);
+        $decodedDataString = json_decode($dataString,false, 512, JSON_THROW_ON_ERROR);
         if ($decodedDataString === false) {
+            continue;
+        }
+
+        if (!($token[$decodedDataString->tokenindex] ?? false)) {
             continue;
         }
 
@@ -257,35 +278,46 @@ foreach ($streamCsv as $dataKey => $dataString) {
         // Article primary key. Usually 'id'
         $pk = (int)$decodedDataString->id;
 
-
         $output = $process($pk ? 'PATCH' : 'POST', $endpoint($baseUrl[$decodedDataString->tokenindex], $basePath, $pk), $dataString, $headers, $timeout, $curl);
-
-        $decodedJsonOutput = json_decode($output);
+        $decodedJsonOutput = json_decode($output,false, 512, JSON_THROW_ON_ERROR);
 
         // don't show errors, handle them gracefully
-        if (isset($decodedJsonOutput->errors)) {
+        if (isset($decodedJsonOutput->errors) && (!($storage[$dataCurrentCSVline] ?? false))) {
             // If article is potentially a duplicate (already exists with same alias)
-            $storage[$dataKey] = ['mightExists' => $decodedJsonOutput->errors[0]->code === 400, 'decodedDataString' => $decodedDataString,];
+            $storage[$dataCurrentCSVline] = ['mightExists' => $decodedJsonOutput->errors[0]->code === 400, 'decodedDataString' => $decodedDataString,];
             continue;
         }
+        echo $silent == 1 ? sprintf("\033[32m Deployed to: %s, CSV Line: %d, type: %s, id: %d, title: %s, alias: %s, created: %s\033[0m%s",
+            $decodedDataString->tokenindex,
+            $dataKey,
+            $decodedJsonOutput->data->type,
+            $decodedJsonOutput->data->id,
+            $decodedJsonOutput->data->attributes->title,
+            $decodedJsonOutput->data->attributes->alias,
+            $decodedJsonOutput->data->attributes->created,
+            PHP_EOL) : '';
     } catch (Throwable $e) {
-        echo $silent ? '' : sprintf('Message: %s, Line: %d%s', $e->getMessage(), $e->getLine(), PHP_EOL);
+        echo $silent == 1 ? sprintf("\033[31m Error message: %s, Error code line: %d, Error CSV Line: %d\033[0m%s", $e->getMessage(), $e->getLine(), $dataCurrentCSVline, PHP_EOL) : '';
         continue;
     } finally {
         curl_close($curl);
     }
 }
 // Handle errors and retries
-foreach ($storage as $dataKeyRetry => $item) {
-    $curl = curl_init();
+foreach ($storage as $dataCurrentCSVlineToRetry => $item) {
+    $curlRetry = curl_init();
     try {
         if ($item['mightExists']) {
             $pk = (int)$item['decodedDataString']->id;
             $item['decodedDataString']->alias = sprintf('%s-%s', $item['decodedDataString']->alias, bin2hex(random_bytes(4)));
 
-            $dataString = json_encode($item['decodedDataString']);
+            $dataString = json_encode($item['decodedDataString'], JSON_THROW_ON_ERROR);
 
             if (!is_string($dataString)) {
+                continue;
+            }
+
+            if (!($token[$item['decodedDataString']->tokenindex] ?? false)) {
                 continue;
             }
 
@@ -296,13 +328,22 @@ foreach ($storage as $dataKeyRetry => $item) {
                 'Content-Length: ' . mb_strlen($dataString),
                 sprintf('X-Joomla-Token: %s', trim($token[$item['decodedDataString']->tokenindex])),
             ];
-            $output = $process($pk ? 'PATCH' : 'POST', $endpoint($baseUrl[$item['decodedDataString']->tokenindex], $basePath, $pk), $dataString, $headers, $timeout, $curl);
-            echo $silent ? '' : $output . PHP_EOL;
+            $output = $process($pk ? 'PATCH' : 'POST', $endpoint($baseUrl[$item['decodedDataString']->tokenindex], $basePath, $pk), $dataString, $headers, $timeout, $curlRetry);
+            $result = json_decode($output, false, 512, JSON_THROW_ON_ERROR);
+            echo $silent == 1 ? sprintf("\033[32m Deployed to: %s, CSV Line: %d, type: %s, id: %d, title: %s, alias: %s, created: %s\033[0m%s",
+                $item['decodedDataString']->tokenindex,
+                $dataCurrentCSVlineToRetry,
+                $result->data->type,
+                $result->data->id,
+                $result->data->attributes->title,
+                $result->data->attributes->alias,
+                $result->data->attributes->created,
+                PHP_EOL) : '';
         }
     } catch (Throwable $e) {
-        echo $silent ? '' : sprintf('Message: %s, Line: %d%s', $e->getMessage(), $e->getLine(), PHP_EOL);
+        echo $silent == 1 ? sprintf("\033[31m Error message: %s, Error code line: %d, Error CSV Line: %d\033[0m%s", $e->getMessage(), $e->getLine(), $dataCurrentCSVlineToRetry, PHP_EOL) : '';
         continue;
     } finally {
-        curl_close($curl);
+        curl_close($curlRetry);
     }
 }
