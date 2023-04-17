@@ -114,10 +114,9 @@ $nested = function (array $arr, int $isSilent = 0): array {
     return $handleComplexValues;
 };
 
-// PHP Generator to efficiently read the csv file
-$generator = function (string $url, array $keys, callable $givenNested, int $isSilent = 1, array $lineRange = []): Generator {
+$csvReader = function (string $url, array $keys, callable $givenNested, int $isSilent = 1, array $lineRange = [], ?callable $handler = null) {
     if (empty($url)) {
-        yield new RuntimeException('Url MUST NOT be empty', 422);
+        throw new RuntimeException('Url MUST NOT be empty', 422);
     }
 
     $defaultKeys = [
@@ -147,7 +146,7 @@ $generator = function (string $url, array $keys, callable $givenNested, int $isS
     $resource = fopen($url, 'r');
 
     if ($resource === false) {
-        yield new RuntimeException('Could not read csv file', 500);
+        throw new RuntimeException('Could not read csv file', 500);
     }
 
     try {
@@ -160,7 +159,7 @@ $generator = function (string $url, array $keys, callable $givenNested, int $isS
         );
 
         if (!is_string($firstLine) || empty($firstLine)) {
-            yield new RuntimeException('First line MUST NOT be empty. It is the header', 422);
+            throw new RuntimeException('First line MUST NOT be empty. It is the header', 422);
         }
 
         $csvHeaderKeys = str_getcsv($firstLine);
@@ -208,9 +207,9 @@ $generator = function (string $url, array $keys, callable $givenNested, int $isS
             }
 
             if ($encodedContent === false) {
-                yield new RuntimeException('Current line seem to be invalid', 422);
-            } elseif (is_string($encodedContent) && (($isExpanded && in_array($currentCsvLineNumber, $lineRange, true)) || !$isExpanded)) {
-                yield ['line' => $currentCsvLineNumber, 'content' => $encodedContent];
+                throw new RuntimeException('Current line seem to be invalid', 422);
+            } elseif ((is_string($encodedContent) && (($isExpanded && in_array($currentCsvLineNumber, $lineRange, true)) || !$isExpanded)) && is_callable($handler)) {
+                $handler(['line' => $currentCsvLineNumber, 'content' => $encodedContent]);
             }
         } while (!feof($resource));
     } finally {
@@ -244,10 +243,10 @@ $process = function (string $givenHttpVerb, string $endpoint, string $dataString
     return $response;
 };
 $expandedLineNumbers = $computedLineNumbers($whatLineNumbersYouWant);
-$streamCsv = $generator($csvUrl, $customFieldKeys, $nested, $silent, $expandedLineNumbers);
 $storage = [];
 
-foreach ($streamCsv as $dataKey => $dataValue) {
+$csvReader($csvUrl, $customFieldKeys, $nested, $silent, $expandedLineNumbers, function ($dataValue) use (&$storage, $endpoint, $baseUrl, $basePath, $token, $silent, $timeout, $process) {
+
     $dataCurrentCSVline = $dataValue['line'];
     $dataString = $dataValue['content'];
 
@@ -255,16 +254,16 @@ foreach ($streamCsv as $dataKey => $dataValue) {
 
     try {
         if (!is_string($dataString)) {
-            continue;
+            return;
         }
 
-        $decodedDataString = json_decode($dataString,false, 512, JSON_THROW_ON_ERROR);
+        $decodedDataString = json_decode($dataString, false, 512, JSON_THROW_ON_ERROR);
         if ($decodedDataString === false) {
-            continue;
+            return;
         }
 
         if (!($token[$decodedDataString->tokenindex] ?? false)) {
-            continue;
+            return;
         }
 
         // HTTP request headers
@@ -279,17 +278,17 @@ foreach ($streamCsv as $dataKey => $dataValue) {
         $pk = (int)$decodedDataString->id;
 
         $output = $process($pk ? 'PATCH' : 'POST', $endpoint($baseUrl[$decodedDataString->tokenindex], $basePath, $pk), $dataString, $headers, $timeout, $curl);
-        $decodedJsonOutput = json_decode($output,false, 512, JSON_THROW_ON_ERROR);
+        $decodedJsonOutput = json_decode($output, false, 512, JSON_THROW_ON_ERROR);
 
         // don't show errors, handle them gracefully
         if (isset($decodedJsonOutput->errors) && (!($storage[$dataCurrentCSVline] ?? false))) {
             // If article is potentially a duplicate (already exists with same alias)
             $storage[$dataCurrentCSVline] = ['mightExists' => $decodedJsonOutput->errors[0]->code === 400, 'decodedDataString' => $decodedDataString,];
-            continue;
+            return;
         }
         echo $silent == 1 ? sprintf("\033[32m Deployed to: %s, CSV Line: %d, type: %s, id: %d, title: %s, alias: %s, created: %s\033[0m%s",
             $decodedDataString->tokenindex,
-            $dataKey,
+            $dataCurrentCSVline,
             $decodedJsonOutput->data->type,
             $decodedJsonOutput->data->id,
             $decodedJsonOutput->data->attributes->title,
@@ -298,11 +297,12 @@ foreach ($streamCsv as $dataKey => $dataValue) {
             PHP_EOL) : '';
     } catch (Throwable $e) {
         echo $silent == 1 ? sprintf("\033[31m Error message: %s, Error code line: %d, Error CSV Line: %d\033[0m%s", $e->getMessage(), $e->getLine(), $dataCurrentCSVline, PHP_EOL) : '';
-        continue;
+        return;
     } finally {
         curl_close($curl);
     }
-}
+});// Execute the function
+
 // Handle errors and retries
 foreach ($storage as $dataCurrentCSVlineToRetry => $item) {
     $curlRetry = curl_init();
