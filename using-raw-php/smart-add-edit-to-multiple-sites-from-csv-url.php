@@ -44,7 +44,14 @@ $customFieldKeys = []; //['with-coffee','with-dessert','extra-water-bottle'];
 $silent = 1;
 
 // Line numbers we want in any order (e.g 9,7-7,2-4,10,17-14,21). Leave empty '' to process all lines (beginning at line 2. Same as csv file)
-$whatLineNumbersYouWant = '2-30';
+$whatLineNumbersYouWant = '';
+
+defined('IS_CLI') || define('IS_CLI', PHP_SAPI == 'cli' ? true : false);
+defined('CUSTOM_LINE_END') || define('CUSTOM_LINE_END', PHP_SAPI == 'cli' ? PHP_EOL . '===================' . PHP_EOL : '<br>===================<br>');
+defined('ANSI_COLOR_RED') || define('ANSI_COLOR_RED', PHP_SAPI == 'cli' ? "\033[31m" : '');
+defined('ANSI_COLOR_GREEN') || define('ANSI_COLOR_GREEN', PHP_SAPI == 'cli' ? "\033[32m" : '');
+defined('ANSI_COLOR_BLUE') || define('ANSI_COLOR_BLUE', PHP_SAPI == 'cli' ? "\033[34m" : '');
+defined('ANSI_COLOR_NORMAL') || define('ANSI_COLOR_NORMAL', PHP_SAPI == 'cli' ? "\033[0m" : '');
 
 $computedLineNumbers = function (string $wantedLineNumbers = '') {
     if ($wantedLineNumbers === '') {
@@ -99,25 +106,24 @@ $nested = function (array $arr, int $isSilent = 0): array {
     $iterator = new RecursiveIteratorIterator(new RecursiveArrayIterator($arr), RecursiveIteratorIterator::CATCH_GET_CHILD);
     foreach ($iterator as $key => $value) {
         if (mb_strpos($value, '{') === 0) {
-            echo $isSilent == 2 ? sprintf("\033[34m item with key: %s with value: %s\033[0m%s", $key, $value, PHP_EOL) : '';
+            echo $isSilent == 2 ? sprintf("%s item with key: %s with value: %s%s%s", ANSI_COLOR_BLUE, $key, $value, ANSI_COLOR_NORMAL, CUSTOM_LINE_END) : '';
             // Doesn't seem to make sense at first but this one line allows to show intro/fulltext images and urla,urlb,urlc
             $handleComplexValues[$key] = json_decode(str_replace(["\n", "\r", "\t"], '', trim($value)));
         } elseif (json_decode($value) === false) {
             $handleComplexValues[$key] = json_encode($value);
-            echo $isSilent == 2 ? sprintf("\033[34m item with key: %s with value: %s\033[0m%s", $key, $value, PHP_EOL) : '';
+            echo $isSilent == 2 ? sprintf("%s item with key: %s with value: %s%s%s", ANSI_COLOR_BLUE, $key, $value, ANSI_COLOR_NORMAL, CUSTOM_LINE_END) : '';
         } else {
             $handleComplexValues[$key] = $value;
-            echo $isSilent == 2 ? sprintf("\033[34m item with key: %s with value: %s\033[0m%s", $key, $value, PHP_EOL) : '';
+            echo $isSilent == 2 ? sprintf("%s item with key: %s with value: %s%s%s", ANSI_COLOR_BLUE, $key, $value, ANSI_COLOR_NORMAL, CUSTOM_LINE_END) : '';
         }
     }
 
     return $handleComplexValues;
 };
 
-// PHP Generator to efficiently read the csv file
-$generator = function (string $url, array $keys, callable $givenNested, int $isSilent = 1, array $lineRange = []): Generator {
+$csvReader = function (string $url, array $keys, callable $givenNested, int $isSilent = 1, array $lineRange = [], ?callable $handler = null) {
     if (empty($url)) {
-        yield new RuntimeException('Url MUST NOT be empty', 422);
+        throw new RuntimeException('Url MUST NOT be empty', 422);
     }
 
     $defaultKeys = [
@@ -147,7 +153,7 @@ $generator = function (string $url, array $keys, callable $givenNested, int $isS
     $resource = fopen($url, 'r');
 
     if ($resource === false) {
-        yield new RuntimeException('Could not read csv file', 500);
+        throw new RuntimeException('Could not read csv file', 500);
     }
 
     try {
@@ -160,7 +166,7 @@ $generator = function (string $url, array $keys, callable $givenNested, int $isS
         );
 
         if (!is_string($firstLine) || empty($firstLine)) {
-            yield new RuntimeException('First line MUST NOT be empty. It is the header', 422);
+            throw new RuntimeException('First line MUST NOT be empty. It is the header', 422);
         }
 
         $csvHeaderKeys = str_getcsv($firstLine);
@@ -208,9 +214,9 @@ $generator = function (string $url, array $keys, callable $givenNested, int $isS
             }
 
             if ($encodedContent === false) {
-                yield new RuntimeException('Current line seem to be invalid', 422);
-            } elseif (is_string($encodedContent) && (($isExpanded && in_array($currentCsvLineNumber, $lineRange, true)) || !$isExpanded)) {
-                yield ['line' => $currentCsvLineNumber, 'content' => $encodedContent];
+                throw new RuntimeException('Current line seem to be invalid', 422);
+            } elseif ((is_string($encodedContent) && (($isExpanded && in_array($currentCsvLineNumber, $lineRange, true)) || !$isExpanded)) && is_callable($handler)) {
+                $handler(['line' => $currentCsvLineNumber, 'content' => $encodedContent]);
             }
         } while (!feof($resource));
     } finally {
@@ -244,65 +250,71 @@ $process = function (string $givenHttpVerb, string $endpoint, string $dataString
     return $response;
 };
 $expandedLineNumbers = $computedLineNumbers($whatLineNumbersYouWant);
-$streamCsv = $generator($csvUrl, $customFieldKeys, $nested, $silent, $expandedLineNumbers);
 $storage = [];
+try {
+    $csvReader($csvUrl, $customFieldKeys, $nested, $silent, $expandedLineNumbers, function ($dataValue) use (&$storage, $endpoint, $baseUrl, $basePath, $token, $silent, $timeout, $process) {
 
-foreach ($streamCsv as $dataKey => $dataValue) {
-    $dataCurrentCSVline = $dataValue['line'];
-    $dataString = $dataValue['content'];
+        $dataCurrentCSVline = $dataValue['line'];
+        $dataString = $dataValue['content'];
 
-    $curl = curl_init();
+        $curl = curl_init();
 
-    try {
-        if (!is_string($dataString)) {
-            continue;
+        try {
+            if (!is_string($dataString)) {
+                return;
+            }
+
+            $decodedDataString = json_decode($dataString, false, 512, JSON_THROW_ON_ERROR);
+            if ($decodedDataString === false) {
+                return;
+            }
+
+            if (!($token[$decodedDataString->tokenindex] ?? false)) {
+                return;
+            }
+
+            // HTTP request headers
+            $headers = [
+                'Accept: application/vnd.api+json',
+                'Content-Type: application/json',
+                'Content-Length: ' . mb_strlen($dataString),
+                sprintf('X-Joomla-Token: %s', trim($token[$decodedDataString->tokenindex])),
+            ];
+
+            // Article primary key. Usually 'id'
+            $pk = (int)$decodedDataString->id;
+
+            $output = $process($pk ? 'PATCH' : 'POST', $endpoint($baseUrl[$decodedDataString->tokenindex], $basePath, $pk), $dataString, $headers, $timeout, $curl);
+            $decodedJsonOutput = json_decode($output, false, 512, JSON_THROW_ON_ERROR);
+
+            // don't show errors, handle them gracefully
+            if (isset($decodedJsonOutput->errors) && (!($storage[$dataCurrentCSVline] ?? false))) {
+                // If article is potentially a duplicate (already exists with same alias)
+                $storage[$dataCurrentCSVline] = ['mightExists' => $decodedJsonOutput->errors[0]->code === 400, 'decodedDataString' => $decodedDataString,];
+                return;
+            }
+            echo $silent == 1 ? sprintf("%s Deployed to: %s, CSV Line: %d, type: %s, id: %d, title: %s, alias: %s, created: %s%s%s",
+                ANSI_COLOR_GREEN,
+                $decodedDataString->tokenindex,
+                $dataCurrentCSVline,
+                $decodedJsonOutput->data->type,
+                $decodedJsonOutput->data->id,
+                $decodedJsonOutput->data->attributes->title,
+                $decodedJsonOutput->data->attributes->alias,
+                $decodedJsonOutput->data->attributes->created,
+                ANSI_COLOR_NORMAL, CUSTOM_LINE_END) : '';
+        } catch (Throwable $e) {
+            echo $silent == 1 ? sprintf("%s Error message: %s, Error code line: %d, Error CSV Line: %d%s%s", ANSI_COLOR_RED, $e->getMessage(), $e->getLine(), $dataCurrentCSVline, ANSI_COLOR_NORMAL, CUSTOM_LINE_END) : '';
+            return;
+        } finally {
+            curl_close($curl);
         }
-
-        $decodedDataString = json_decode($dataString,false, 512, JSON_THROW_ON_ERROR);
-        if ($decodedDataString === false) {
-            continue;
-        }
-
-        if (!($token[$decodedDataString->tokenindex] ?? false)) {
-            continue;
-        }
-
-        // HTTP request headers
-        $headers = [
-            'Accept: application/vnd.api+json',
-            'Content-Type: application/json',
-            'Content-Length: ' . mb_strlen($dataString),
-            sprintf('X-Joomla-Token: %s', trim($token[$decodedDataString->tokenindex])),
-        ];
-
-        // Article primary key. Usually 'id'
-        $pk = (int)$decodedDataString->id;
-
-        $output = $process($pk ? 'PATCH' : 'POST', $endpoint($baseUrl[$decodedDataString->tokenindex], $basePath, $pk), $dataString, $headers, $timeout, $curl);
-        $decodedJsonOutput = json_decode($output,false, 512, JSON_THROW_ON_ERROR);
-
-        // don't show errors, handle them gracefully
-        if (isset($decodedJsonOutput->errors) && (!($storage[$dataCurrentCSVline] ?? false))) {
-            // If article is potentially a duplicate (already exists with same alias)
-            $storage[$dataCurrentCSVline] = ['mightExists' => $decodedJsonOutput->errors[0]->code === 400, 'decodedDataString' => $decodedDataString,];
-            continue;
-        }
-        echo $silent == 1 ? sprintf("\033[32m Deployed to: %s, CSV Line: %d, type: %s, id: %d, title: %s, alias: %s, created: %s\033[0m%s",
-            $decodedDataString->tokenindex,
-            $dataKey,
-            $decodedJsonOutput->data->type,
-            $decodedJsonOutput->data->id,
-            $decodedJsonOutput->data->attributes->title,
-            $decodedJsonOutput->data->attributes->alias,
-            $decodedJsonOutput->data->attributes->created,
-            PHP_EOL) : '';
-    } catch (Throwable $e) {
-        echo $silent == 1 ? sprintf("\033[31m Error message: %s, Error code line: %d, Error CSV Line: %d\033[0m%s", $e->getMessage(), $e->getLine(), $dataCurrentCSVline, PHP_EOL) : '';
-        continue;
-    } finally {
-        curl_close($curl);
-    }
+    });// Execute the function
+} catch (Throwable $e) {
+    echo $silent == 1 ? sprintf("%s Error message: %s, Error code line: %d, %s%s", ANSI_COLOR_RED, $e->getMessage(), $e->getLine(), ANSI_COLOR_NORMAL, CUSTOM_LINE_END) : '';
 }
+
+
 // Handle errors and retries
 foreach ($storage as $dataCurrentCSVlineToRetry => $item) {
     $curlRetry = curl_init();
@@ -330,7 +342,8 @@ foreach ($storage as $dataCurrentCSVlineToRetry => $item) {
             ];
             $output = $process($pk ? 'PATCH' : 'POST', $endpoint($baseUrl[$item['decodedDataString']->tokenindex], $basePath, $pk), $dataString, $headers, $timeout, $curlRetry);
             $result = json_decode($output, false, 512, JSON_THROW_ON_ERROR);
-            echo $silent == 1 ? sprintf("\033[32m Deployed to: %s, CSV Line: %d, type: %s, id: %d, title: %s, alias: %s, created: %s\033[0m%s",
+            echo $silent == 1 ? sprintf("%s Deployed to: %s, CSV Line: %d, type: %s, id: %d, title: %s, alias: %s, created: %s%s%s",
+                ANSI_COLOR_GREEN,
                 $item['decodedDataString']->tokenindex,
                 $dataCurrentCSVlineToRetry,
                 $result->data->type,
@@ -338,10 +351,10 @@ foreach ($storage as $dataCurrentCSVlineToRetry => $item) {
                 $result->data->attributes->title,
                 $result->data->attributes->alias,
                 $result->data->attributes->created,
-                PHP_EOL) : '';
+                ANSI_COLOR_NORMAL, CUSTOM_LINE_END) : '';
         }
     } catch (Throwable $e) {
-        echo $silent == 1 ? sprintf("\033[31m Error message: %s, Error code line: %d, Error CSV Line: %d\033[0m%s", $e->getMessage(), $e->getLine(), $dataCurrentCSVlineToRetry, PHP_EOL) : '';
+        echo $silent == 1 ? sprintf("%s Error message: %s, Error code line: %d, Error CSV Line: %d%s%s", ANSI_COLOR_RED, $e->getMessage(), $e->getLine(), $dataCurrentCSVlineToRetry, ANSI_COLOR_NORMAL, CUSTOM_LINE_END) : '';
         continue;
     } finally {
         curl_close($curlRetry);
