@@ -273,6 +273,7 @@ try {
                 return;
             }
 
+
             // HTTP request headers
             $headers = [
                 'Accept: application/vnd.api+json',
