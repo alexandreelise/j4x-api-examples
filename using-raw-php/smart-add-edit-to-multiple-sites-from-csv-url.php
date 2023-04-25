@@ -361,3 +361,4 @@ foreach ($storage as $dataCurrentCSVlineToRetry => $item) {
         curl_close($curlRetry);
     }
 }
+echo sprintf("Done%s", CUSTOM_LINE_END);
