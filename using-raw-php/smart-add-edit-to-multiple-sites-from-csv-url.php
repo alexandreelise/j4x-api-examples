@@ -162,7 +162,7 @@ $csvReader = function (string $url, array $keys, callable $givenNested, int $isS
         $firstLine = stream_get_line(
             $resource,
             0,
-            "\r\n"
+            PHP_EOL
         );
 
         if (!is_string($firstLine) || empty($firstLine)) {
@@ -182,7 +182,7 @@ $csvReader = function (string $url, array $keys, callable $givenNested, int $isS
             $currentLine = stream_get_line(
                 $resource,
                 0,
-                "\r\n"
+                PHP_EOL
             );
             $currentCsvLineNumber += 1;
             if (!is_string($currentLine) || empty($currentLine)) {
