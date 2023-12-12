@@ -1,10 +1,5 @@
 # j4x-api-examples
 
-## WHO AM I?
-
-Hi, I'm Alex, your Joomla Web Services Expert. Need a technical consulting about Joomla Web Service? Head over to [my website](https://apiadept.com)
-
-
 ## WHY?
 If you are a Joomla! developer or want to become a Joomla! developer there is a new resource for you
 [The Official New Joomla! Manual](https://github.com/joomla/Manual.git)
