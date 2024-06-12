@@ -28,4 +28,4 @@ This presentation was made at
 - JoomlaDay D-A-CH 2023.09.16 [video - English](https://www.youtube.com/watch?v=WeI6wIUxGbM)
 
 ## OTHER AUTHORS AND INITIATIVES WITH JOOMLA WEBSERVICES
-- Joomla API Zapier [https://www.covingtoncreations.com/](https://github.com/natecovington/joomla-zapier)
+- Joomla API Zapier [https://github.com/natecovington/joomla-zapier](https://github.com/natecovington/joomla-zapier)
