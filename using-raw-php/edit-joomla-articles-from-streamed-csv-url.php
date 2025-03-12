@@ -11,7 +11,7 @@ declare(strict_types=1);
  */
 
 // Public url of the sample csv used in this example (CHANGE WITH YOUR OWN CSV URL IF YOU WISH)
-$csvUrl = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSIWDcsYMucDxSWB3kqqpzxnAxHfrimLUXcOa3mBWn312HXa8VnwatfGoSWoJsFn1Fpq8r65Uqi8MoG/pub?output=csv';
+$csvUrl = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vTtV7Bnj-E3mwnBgXbkZlzS476aHVp6vtZ7qdI5vxlPUUqNe_85S3ozT5_gzNkBDih4dL1f8uDeeh_g/pub?gid=522567559&single=true&output=csv';
 
 // HTTP Verb
 $httpVerb = 'PATCH';
@@ -21,10 +21,8 @@ $baseUrl  = 'https://example.org';
 $basePath = 'api/index.php/v1';
 
 // This time we need endpoint to be a function to make it more dynamic
-$endpoint = function (string $givenBaseUrl, string $givenBasePath, int $givenResourceId = 0): string {
-	return $givenResourceId ? sprintf('%s/%s/%s/%d', $givenBaseUrl, $givenBasePath, 'content/articles', $givenResourceId)
-		: sprintf('%s/%s/%s', $givenBaseUrl, $givenBasePath, 'content/articles');
-};
+$endpoint = fn(string $givenBaseUrl, string $givenBasePath, int $givenResourceId = 0): string => $givenResourceId ? sprintf('%s/%s/%s/%d', $givenBaseUrl, $givenBasePath, 'content/articles', $givenResourceId)
+    : sprintf('%s/%s/%s', $givenBaseUrl, $givenBasePath, 'content/articles');
 
 $timeout = 10;
 
@@ -38,12 +36,12 @@ $token = '';
 
 // PHP Generator to efficiently read the csv file
 $generator = function (string $url, array $keys = []): Generator {
-	
+
 	if (empty($url))
 	{
 		yield new RuntimeException('Url MUST NOT be empty', 422);
 	}
-	
+
 	$defaultKeys = [
 		'id',
 		'title',
@@ -58,21 +56,21 @@ $generator = function (string $url, array $keys = []): Generator {
 		'state',
 		'featured',
 	];
-	
+
 	$mergedKeys = array_unique(array_merge($defaultKeys, $keys));
-	
+
 	$resource = fopen($url, 'r');
-	
+
 	if ($resource === false)
 	{
 		yield new RuntimeException('Could not read csv file', 500);
 	}
-	
+
 	try
 	{
 		//NON-BLOCKING I/O (Does not wait before processing next line.)
 		stream_set_blocking($resource, false);
-		
+
 		do
 		{
 			$currentLine = stream_get_line(
@@ -80,18 +78,18 @@ $generator = function (string $url, array $keys = []): Generator {
 				0,
 				"\r\n"
 			);
-			
+
 			if (empty($currentLine))
 			{
 				yield new RuntimeException('Current line MUST NOT be empty', 422);
 			}
-			
+
 			$extractedContent = str_getcsv($currentLine);
-			
+
 			if ($mergedKeys != $extractedContent)
 			{
 				$encodedContent = json_encode(array_combine($mergedKeys, $extractedContent));
-				
+
 				yield $encodedContent;
 			}
 			yield new RuntimeException('Current line seem to be invalid', 422);
@@ -120,11 +118,11 @@ $process = function (string $givenHttpVerb, string $endpoint, string $dataString
 			CURLOPT_HTTPHEADER     => $headers,
 		]
 	);
-	
+
 	$response = curl_exec($transport);
 	// Might slow down the script but at least shows what's going on
 	echo $response . PHP_EOL;
-	
+
 	return $response;
 };
 
@@ -144,7 +142,7 @@ foreach ($streamCsv as $dataString)
 			'Content-Length: ' . mb_strlen($dataString),
 			sprintf('X-Joomla-Token: %s', trim($token)),
 		];
-		
+
 		$output = $process($httpVerb, $endpoint($baseUrl, $basePath, (int) (json_decode($dataString, true)['id'])), $dataString, $headers, $timeout, $curl);
 		// Continue even on partial failure
 		if (empty($output) || array_key_exists('errors', json_decode($output, true)))
