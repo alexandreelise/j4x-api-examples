@@ -1,4 +1,14 @@
-# j4x-api-examples
+# Joomla! Web Services / API practical ready to use examples
+
+> Some Joomla! Web Services / API practical ready to use examples to try out. Should work for Joomla 4.x, Joomla 5.x, Joomla 6.x and beyond.
+
+> [!TIP]
+> Don't let technical problems KILL your AMBITIONS...
+
+![visitor badge](https://visitor-badge.laobi.icu/badge?page_id=alexandreelise.j4x-api-examples&style=flat&format=true)
+![GitHub followers](https://img.shields.io/github/followers/alexandreelise?style=flat)
+![YouTube Channel Views](https://img.shields.io/youtube/channel/views/UCCya8rIL-PVHm8Mt4QPW-xw?style=flat&label=YouTube%20%40ApiAdept%20vues)
+
 
 ## WHY?
 If you are a Joomla! developer or want to become a Joomla! developer there is a new resource for you
